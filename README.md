@@ -63,42 +63,33 @@ If your Canvas account does not show token creation, contact your Canvas admin.
 
 ## Faculty Workflows (Codex + Canvas)
 
-### 1) Update one assignment
+The skill package teaches Codex how to:
 
-```bash
-canvas pull "ENGL-101" -a "Essay 1"
-```
+- run the right `canvas` commands for pull/push
+- preserve required Canvas metadata (`canvas_id`)
+- use a safe publish flow (`--dry-run` before real push)
+- keep HTML tables intact so accessibility markup is not lost
 
-Ask Codex: "Revise this assignment for clarity, keep points and due date the same."
+That means you can use plain-language requests instead of memorizing commands.
 
-Preview and push:
+### Example prompts you can paste to Codex
 
-```bash
-canvas push -f "English/SP26-ENGL-101-codex-course/assignments/Essay-1.md" --dry-run
-canvas push -f "English/SP26-ENGL-101-codex-course/assignments/Essay-1.md"
-```
+1. Update one assignment:
+   `Pull Essay 1 from ENGL-101, rewrite for clarity and student-friendly tone, keep points and due date the same, then show me a dry-run push command.`
 
-### 2) Update a module page set
+2. Improve a module for accessibility:
+   `Pull Module 2 from PHIL-123, improve headings and link text for accessibility across all pages, then prepare a dry-run push for that module.`
 
-```bash
-canvas pull "PHIL-123" -m "Module 2"
-canvas push -m "Module-2" --dry-run
-canvas push -m "Module-2"
-```
+3. Make a table fully accessible:
+   `Find the grading table in this pulled assignment, add a caption and proper column/row headers with scope attributes, preserve table structure, then show me the dry-run push command.`
 
-### 3) Pull ungraded submissions for feedback
+4. Review ungraded discussions:
+   `Pull ungraded submissions for 2.4 Discussion in PHIL-123 (including discussion posts), summarize common issues, and draft reusable feedback comments.`
 
-```bash
-canvas pull "PHIL-123" -a "2.4 Discussion" --submissions ungraded --discussions
-```
+5. Update and attach a rubric:
+   `Pull rubrics for PHIL-123, revise the Discussion rubric for clearer performance levels, run a dry-run push, then attach it to assignment 2.4 after I confirm.`
 
-### 4) Edit rubrics locally
-
-```bash
-canvas pull "PHIL-123" --rubrics
-canvas push -f "Philosophy/SP26-PHIL-123-codex-course/rubrics/Discussion-Rubric.yaml" --dry-run
-canvas push -f "Philosophy/SP26-PHIL-123-codex-course/rubrics/Discussion-Rubric.yaml"
-```
+If you prefer manual commands, see the command reference below.
 
 ## Commands
 
