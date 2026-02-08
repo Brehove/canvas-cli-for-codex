@@ -57,6 +57,7 @@ canvas courses
 4. Enter a purpose (example: `Codex Canvas CLI`) and optional expiration date.
 5. Select create/generate token.
 6. Copy the token immediately and paste it into `canvas config` when prompted.
+   If needed, you can also paste it manually into `.canvas-config.yaml` as the `api_token` value.
 
 Treat the token like a password. If it is exposed, revoke it in Canvas and create a new one.
 If your Canvas account does not show token creation, contact your Canvas admin.
@@ -78,7 +79,8 @@ That means you can use plain-language requests instead of memorizing commands.
 2. Start Codex in that folder.
 3. If this is your first time in that folder, ask Codex:
    `Use the canvas skill to help me run canvas config in this folder.`
-   Running `canvas config` prompts for your Canvas URL and API token (token entry is hidden).
+   Codex should prompt you to enter your Canvas URL and API token via `canvas config` (token entry is hidden).
+   You can also add the token manually in `.canvas-config.yaml` under `api_token`.
 4. For day-to-day work, start with:
    `Use the canvas skill to help me update content in [COURSE NAME].`
 
