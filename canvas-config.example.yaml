@@ -1,0 +1,13 @@
+canvas_url: https://your-school.instructure.com
+api_token: YOUR_API_TOKEN_HERE
+
+# Map course code prefixes to local folders (optional)
+# Courses matching a prefix are routed to that folder
+course_folders:
+  ENGL: English
+  PHIL: Philosophy
+  HIST: History
+  # Add your own prefixes...
+
+# Default folder for courses that don't match any prefix
+default_folder: courses
