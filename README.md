@@ -78,6 +78,7 @@ That means you can use plain-language requests instead of memorizing commands.
 2. Start Codex in that folder.
 3. If this is your first time in that folder, ask Codex:
    `Use the canvas skill to help me run canvas config in this folder.`
+   Running `canvas config` prompts for your Canvas URL and API token (token entry is hidden).
 4. For day-to-day work, start with:
    `Use the canvas skill to help me update content in [COURSE NAME].`
 
