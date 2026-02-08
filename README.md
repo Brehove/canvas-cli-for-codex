@@ -1,4 +1,4 @@
-# Canvas CLI
+# Canvas CLI for Codex
 
 This is a Codex skill package that lets faculty and staff use natural language to work with Canvas course content inside their local filesystem.
 Instead of memorizing commands, you can ask Codex things like:
@@ -32,7 +32,7 @@ This is the recommended path for faculty/staff who are new to terminal tools.
 ```text
 I am new to terminal workflows.
 Please install and set up this Canvas skill from:
-https://github.com/Brehove/canvas-cli
+https://github.com/Brehove/canvas-cli-for-codex
 
 Please handle any skill-path details for me automatically.
 Then walk me through first-time setup step by step.

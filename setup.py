@@ -18,7 +18,7 @@ setup(
     },
     author="Joel Gladd",
     description="Faculty-friendly CLI for pulling and pushing Canvas LMS content with Codex workflows",
-    url="https://github.com/joelgladd/canvas-cli",
+    url="https://github.com/Brehove/canvas-cli-for-codex",
     license="MIT",
     python_requires=">=3.9",
 )
