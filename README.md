@@ -95,7 +95,7 @@ Why this matters:
    `Pull Essay 1 from ENGL-101, rewrite for clarity and student-friendly tone, keep points and due date the same, then show me a dry-run push command.`
 
 2. Improve a module for accessibility:
-   `Pull Module 2 from PHIL-123, improve headings and link text for accessibility across all pages, then prepare a dry-run push for that module.`
+   `Use the canvas skill to pull all modules in PHIL-123. Evaluate all pulled module content for accessibility issues (heading structure, descriptive link text, table headers/captions, list structure, and image alt text opportunities). Then give me a module-by-module update plan with recommended edits and risk notes. Wait for my approval before making changes. After I approve, apply the updates and show dry-run push commands for each updated module. After I confirm again, push the updated modules to Canvas.`
 
 3. Make a table fully accessible:
    `Find the grading table in this pulled assignment, add a caption and proper column/row headers with scope attributes, preserve table structure, then show me the dry-run push command.`
