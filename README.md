@@ -14,6 +14,12 @@ Before using this skill, set up Codex first:
 - Codex setup guide: https://developers.openai.com/codex/cli
 - Codex overview: https://openai.com/codex/
 
+## Using Claude Code Instead of Codex
+
+You can use this same skill with Claude Code by installing it in `~/.claude/skills/canvas` and running the same `canvas` commands/workflows.
+
+This package is intentionally optimized for Codex because many higher-ed institutions currently have enterprise agreements with OpenAI rather than Anthropic. If your institution uses Claude Code, the workflow still works with only the skill install path changed.
+
 ## What This Solves
 
 - Pull pages, assignments, discussions, rubrics, and submissions from Canvas
