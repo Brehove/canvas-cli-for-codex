@@ -55,3 +55,30 @@ canvas push -m "ModuleName"
 ## Playbooks
 
 Use `references/faculty-playbooks.md` for common faculty/staff tasks and prompt patterns.
+
+## Styled content
+
+Markdown conversion preserves tables and media embeds, but not general page layout
+or inline styling. Inspect live HTML before choosing an editing workflow.
+For styled pages, fetch `/api/v1/courses/:id/pages/:url`, edit the HTML directly,
+preview the change, and update `wiki_page[body]` only within the user's authorization.
+Recheck `updated_at` before writing; if it changed, fetch again and reconcile edits.
+Read back the result and compare text, links, and styles (allow CSS whitespace changes).
+Keep the HTML source separately from the Markdown mirror. Page revisions can recover
+previous bodies. These are workflow safeguards, not automatic CLI enforcement.
+
+## Discussion checkpoints and dates
+
+The API client supports setting initial-post/reply checkpoints and explicitly
+turning checkpoint mode off. Audit each discussion individually; do not enable
+reply requirements course-wide. Disabling checkpoints is an explicit API operation;
+then set ordinary assignment dates/points. Omitting checkpoints from Markdown does
+not disable them. The CLI supports checkpoint updates from frontmatter, along with
+assignment availability dates. Confirm intended dates and points before publishing.
+
+## Full-course pulls
+
+Full pulls organize content by module and retain existing page/assignment paths
+using typed identifiers. Pages and assignments outside modules are also included.
+Quiz module items save their associated assignment, not quiz questions. External
+links, tools, and files are not downloaded by this workflow.
