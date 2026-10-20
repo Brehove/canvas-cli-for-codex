@@ -27,6 +27,19 @@ def html_to_markdown(html_content: str) -> str:
         return f"__HTML_TABLE_{len(html_tables)-1}__"
     text = re.sub(r'<table[^>]*>.*?</table>', save_html_table, text, flags=re.DOTALL | re.IGNORECASE)
 
+    # Preserve embed-style tags as-is (Canvas Studio, YouTube, Vimeo, audio, etc.)
+    # These cannot be expressed in markdown and would otherwise be stripped by the
+    # catch-all "remove remaining HTML tags" step below.
+    html_embeds = []
+    def save_html_embed(m):
+        html_embeds.append(m.group(0))
+        return f"__HTML_EMBED_{len(html_embeds)-1}__"
+    # Tags that require closing tags
+    text = re.sub(r'<(iframe|video|audio|object)\b[^>]*>.*?</\1>',
+                  save_html_embed, text, flags=re.DOTALL | re.IGNORECASE)
+    # <embed> is a void element
+    text = re.sub(r'<embed\b[^>]*/?>', save_html_embed, text, flags=re.IGNORECASE)
+
     # Decode HTML entities
     text = html.unescape(text)
 
@@ -55,15 +68,31 @@ def html_to_markdown(html_content: str) -> str:
     text = re.sub(r'<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*/?>', r'![\2](\1)', text, flags=re.IGNORECASE)
     text = re.sub(r'<img[^>]*src="([^"]*)"[^>]*/?>', r'![](\1)', text, flags=re.IGNORECASE)
 
-    # Lists - handle nested lists by processing multiple times
-    # Unordered lists
-    text = re.sub(r'<ul[^>]*>', '\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'</ul>', '\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'<li[^>]*>(.*?)</li>', r'- \1\n', text, flags=re.DOTALL | re.IGNORECASE)
+    # Lists. Convert whole list blocks so ordered-list semantics survive pulls.
+    def convert_list_block(match, ordered=False):
+        items = re.findall(
+            r'<li[^>]*>(.*?)</li>', match.group(1), flags=re.DOTALL | re.IGNORECASE
+        )
+        if ordered:
+            lines = [f"{index}. {item}" for index, item in enumerate(items, start=1)]
+        else:
+            lines = [f"- {item}" for item in items]
+        return '\n' + '\n'.join(lines) + '\n'
 
-    # Ordered lists (simplified - doesn't maintain numbering)
-    text = re.sub(r'<ol[^>]*>', '\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'</ol>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(
+        r'<ol[^>]*>(.*?)</ol>',
+        lambda match: convert_list_block(match, ordered=True),
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    text = re.sub(
+        r'<ul[^>]*>(.*?)</ul>',
+        lambda match: convert_list_block(match, ordered=False),
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Graceful fallback for orphan list items in malformed source HTML.
+    text = re.sub(r'<li[^>]*>(.*?)</li>', r'- \1\n', text, flags=re.DOTALL | re.IGNORECASE)
 
     # Blockquotes
     text = re.sub(r'<blockquote[^>]*>(.*?)</blockquote>', lambda m: '> ' + m.group(1).replace('\n', '\n> '), text, flags=re.DOTALL | re.IGNORECASE)
@@ -97,7 +126,11 @@ def html_to_markdown(html_content: str) -> str:
     for i, table in enumerate(html_tables):
         text = text.replace(f"__HTML_TABLE_{i}__", f"\n\n{table}\n\n")
 
-    # Final cleanup of any extra newlines from table restoration
+    # Restore preserved embeds (iframe/video/audio/object/embed)
+    for i, embed in enumerate(html_embeds):
+        text = text.replace(f"__HTML_EMBED_{i}__", f"\n\n{embed}\n\n")
+
+    # Final cleanup of any extra newlines from table/embed restoration
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = text.strip()
 
@@ -118,6 +151,24 @@ def markdown_to_html(markdown_content: str) -> str:
 
     text = markdown_content
 
+    # Canvas pulls often leave blank lines between adjacent list items. The
+    # line-oriented converter would otherwise close and reopen the list for
+    # every item, weakening list semantics for assistive technology. Collapse
+    # only blank lines whose surrounding lines are the same list type.
+    previous = None
+    while text != previous:
+        previous = text
+        text = re.sub(
+            r'(?m)^([ \t]*[-*] .+)\n[ \t]*\n(?=[ \t]*[-*] )',
+            r'\1\n',
+            text,
+        )
+        text = re.sub(
+            r'(?m)^([ \t]*\d+\. .+)\n[ \t]*\n(?=[ \t]*\d+\. )',
+            r'\1\n',
+            text,
+        )
+
     # Preserve HTML tables as-is (extract before any processing)
     # Use a placeholder that looks like HTML so paragraph logic doesn't wrap it
     html_tables = []
@@ -125,6 +176,18 @@ def markdown_to_html(markdown_content: str) -> str:
         html_tables.append(m.group(0))
         return f"<__HTML_TABLE_{len(html_tables)-1}__/>"
     text = re.sub(r'<table[^>]*>.*?</table>', save_html_table, text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Preserve embed-style tags as-is (iframe/video/audio/object/embed).
+    # Without this, attribute values containing markdown syntax (e.g. * in
+    # an iframe `allow="geolocation *; ..."`) get mangled by the bold/italic
+    # regexes below.
+    html_embeds = []
+    def save_html_embed(m):
+        html_embeds.append(m.group(0))
+        return f"<__HTML_EMBED_{len(html_embeds)-1}__/>"
+    text = re.sub(r'<(iframe|video|audio|object)\b[^>]*>.*?</\1>',
+                  save_html_embed, text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<embed\b[^>]*/?>', save_html_embed, text, flags=re.IGNORECASE)
 
     # Code blocks (do first to protect content)
     code_blocks = []
@@ -238,5 +301,9 @@ def markdown_to_html(markdown_content: str) -> str:
     # Restore HTML tables (preserved exactly as they were)
     for i, table in enumerate(html_tables):
         text = text.replace(f"<__HTML_TABLE_{i}__/>", table)
+
+    # Restore preserved embeds
+    for i, embed in enumerate(html_embeds):
+        text = text.replace(f"<__HTML_EMBED_{i}__/>", embed)
 
     return text
