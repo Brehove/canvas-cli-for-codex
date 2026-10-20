@@ -222,3 +222,22 @@ python -m unittest discover -s tests -v
 ## License
 
 MIT
+
+## Content preservation and advanced updates
+
+- HTML tables and embedded media (`iframe`, `video`, `audio`, `object`, and `embed`)
+  survive conversion; ordered lists retain numbering.
+- General styled layouts still require direct HTML editing. Follow the styled-content
+  workflow in `SKILL.md`; a Markdown push does not preserve arbitrary inline styling.
+- Assignment Markdown includes availability dates. Graded discussions can push dates
+  and points to their underlying assignment and update checkpoints from frontmatter.
+- The Python API client provides `update_checkpoints` and `disable_checkpoints`.
+  Disabling checkpoint mode is explicit, not inferred from missing frontmatter.
+- Rubric create/update requests use nested form encoding and accept an optional
+  rubric association. The API also supports deleting a rubric or one association.
+- Full-course pulls organize module content into module folders while retaining pages
+  and assignments outside modules. Existing page/assignment paths are reused where
+  their typed identifiers match. Quiz questions are not exported by this workflow.
+
+Checkpoint, rubric, and date behavior is covered by offline mocked API tests; verify
+institution-specific Canvas behavior on a test course before relying on it in production.
