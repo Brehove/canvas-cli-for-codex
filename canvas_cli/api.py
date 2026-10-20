@@ -5,6 +5,22 @@ from typing import Optional, Iterator, Any
 from urllib.parse import urljoin
 
 
+def _flatten_form_fields(prefix: str, value: Any) -> list[tuple[str, str]]:
+    """Flatten nested Canvas parameters into Rails-style bracket fields."""
+    fields: list[tuple[str, str]] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            fields.extend(_flatten_form_fields(f"{prefix}[{key}]", item))
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            fields.extend(_flatten_form_fields(f"{prefix}[{index}]", item))
+    elif value is not None:
+        if isinstance(value, bool):
+            value = str(value).lower()
+        fields.append((prefix, str(value)))
+    return fields
+
+
 class CanvasAPI:
     """Wrapper for Canvas LMS REST API."""
 
@@ -134,13 +150,37 @@ class CanvasAPI:
         """Get a specific rubric with full details."""
         return self._get(f"courses/{course_id}/rubrics/{rubric_id}", params={"include[]": "assessments"})
 
-    def update_rubric(self, course_id: int, rubric_id: int, **kwargs) -> dict:
+    def update_rubric(self, course_id: int, rubric_id: int,
+                      rubric_association: Optional[dict] = None, **kwargs) -> dict:
         """Update a rubric."""
-        return self._put(f"courses/{course_id}/rubrics/{rubric_id}", json={"rubric": kwargs})
+        fields = _flatten_form_fields("rubric", kwargs)
+        if rubric_association:
+            fields.extend(
+                _flatten_form_fields("rubric_association", rubric_association)
+            )
+        return self._put(
+            f"courses/{course_id}/rubrics/{rubric_id}",
+            data=fields,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
 
-    def create_rubric(self, course_id: int, **kwargs) -> dict:
+    def create_rubric(self, course_id: int,
+                      rubric_association: Optional[dict] = None, **kwargs) -> dict:
         """Create a new rubric."""
-        return self._post(f"courses/{course_id}/rubrics", json={"rubric": kwargs})
+        fields = _flatten_form_fields("rubric", kwargs)
+        if rubric_association:
+            fields.extend(
+                _flatten_form_fields("rubric_association", rubric_association)
+            )
+        return self._post(
+            f"courses/{course_id}/rubrics",
+            data=fields,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+    def delete_rubric(self, course_id: int, rubric_id: int) -> requests.Response:
+        """Delete a rubric and its associations."""
+        return self._delete(f"courses/{course_id}/rubrics/{rubric_id}")
 
     def attach_rubric_to_assignment(self, course_id: int, rubric_id: int, assignment_id: int,
                                      use_for_grading: bool = True) -> dict:
@@ -155,6 +195,13 @@ class CanvasAPI:
             }
         }
         return self._post(f"courses/{course_id}/rubric_associations", json=data)
+
+    def delete_rubric_association(self, course_id: int,
+                                  association_id: int) -> requests.Response:
+        """Delete one rubric association without deleting the rubric."""
+        return self._delete(
+            f"courses/{course_id}/rubric_associations/{association_id}"
+        )
 
     # ==================== Submissions ====================
 
@@ -202,6 +249,83 @@ class CanvasAPI:
     def update_discussion_topic(self, course_id: int, topic_id: int, **kwargs) -> dict:
         """Update a discussion topic."""
         return self._put(f"courses/{course_id}/discussion_topics/{topic_id}", json=kwargs)
+
+    def update_checkpoints(self, topic_id: int, checkpoints: list) -> dict:
+        """Update checkpoints via GraphQL (separate due dates/points for initial post vs replies).
+
+        Each checkpoint dict should have:
+          - tag: 'reply_to_topic' or 'reply_to_entry'
+          - points_possible: float
+          - due_at: ISO 8601 datetime string or None
+        Optional for reply_to_entry: replies_required (int)
+        """
+        gql_checkpoints = []
+        for cp in checkpoints:
+            gql_cp = {
+                "checkpointLabel": cp["tag"],
+                "pointsPossible": cp["points_possible"],
+                "dates": [{"type": "everyone", "dueAt": cp.get("due_at")}],
+            }
+            if cp["tag"] == "reply_to_entry" and cp.get("replies_required"):
+                gql_cp["repliesRequired"] = cp["replies_required"]
+            gql_checkpoints.append(gql_cp)
+
+        query = """mutation UpdateDiscussion($input: UpdateDiscussionTopicInput!) {
+            updateDiscussionTopic(input: $input) {
+                discussionTopic { _id checkpoints { tag pointsPossible dueAt } }
+                errors { message attribute }
+            }
+        }"""
+        variables = {
+            "input": {
+                "discussionTopicId": str(topic_id),
+                "setCheckpoints": True,
+                "assignment": {"forCheckpoints": True},
+                "checkpoints": gql_checkpoints,
+            }
+        }
+        url = f"{self.base_url}/api/graphql"
+        response = self.session.post(url, json={"query": query, "variables": variables})
+        response.raise_for_status()
+        result = response.json()
+        if result.get("errors"):
+            raise Exception(f"GraphQL errors: {result['errors']}")
+        mutation_data = result.get("data", {}).get("updateDiscussionTopic", {})
+        if mutation_data.get("errors"):
+            raise Exception(f"Mutation errors: {mutation_data['errors']}")
+        return mutation_data.get("discussionTopic", {})
+
+    def disable_checkpoints(self, topic_id: int) -> dict:
+        """Convert a checkpointed graded discussion back to one ordinary assignment.
+
+        Canvas does not remove an obsolete reply checkpoint when a shorter
+        checkpoint list is submitted. The GraphQL mutation must explicitly turn
+        checkpoint mode off. Assignment dates and points should be set through the
+        normal assignment update after this call.
+        """
+        query = """mutation UpdateDiscussion($input: UpdateDiscussionTopicInput!) {
+            updateDiscussionTopic(input: $input) {
+                discussionTopic { _id checkpoints { tag pointsPossible dueAt } replyToEntryRequiredCount }
+                errors { message attribute }
+            }
+        }"""
+        variables = {
+            "input": {
+                "discussionTopicId": str(topic_id),
+                "setCheckpoints": False,
+                "assignment": {"setAssignment": True, "forCheckpoints": False},
+            }
+        }
+        url = f"{self.base_url}/api/graphql"
+        response = self.session.post(url, json={"query": query, "variables": variables})
+        response.raise_for_status()
+        result = response.json()
+        if result.get("errors"):
+            raise Exception(f"GraphQL errors: {result['errors']}")
+        mutation_data = result.get("data", {}).get("updateDiscussionTopic", {})
+        if mutation_data.get("errors"):
+            raise Exception(f"Mutation errors: {mutation_data['errors']}")
+        return mutation_data.get("discussionTopic", {})
 
     def get_discussion_entries(self, course_id: int, topic_id: int) -> dict:
         """Get full discussion view with all entries and replies.
