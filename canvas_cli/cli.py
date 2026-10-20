@@ -292,13 +292,25 @@ def attach_rubric(course: str, rubric_name: str, assignment_names: tuple, no_gra
 
 # ==================== Pull Commands ====================
 
-def save_page(course_dir: Path, page: dict, subdir: str = "pages") -> Path:
-    """Save a page as markdown."""
-    pages_dir = course_dir / subdir
-    pages_dir.mkdir(parents=True, exist_ok=True)
+def save_page(course_dir: Path, page: dict, subdir: str = "pages",
+              dest_dir: Path = None, dest_path: Path = None) -> Path:
+    """Save a page as markdown.
 
-    filename = slugify(page.get("title", page["url"])) + ".md"
-    filepath = pages_dir / filename
+    Args:
+        dest_path: If provided, write directly to this file path.
+        dest_dir: If provided, write into this directory (overrides course_dir/subdir).
+        Otherwise falls back to course_dir/subdir.
+    """
+    if dest_path:
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        filepath = dest_path
+    elif dest_dir:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        filepath = dest_dir / (slugify(page.get("title", page["url"])) + ".md")
+    else:
+        pages_dir = course_dir / subdir
+        pages_dir.mkdir(parents=True, exist_ok=True)
+        filepath = pages_dir / (slugify(page.get("title", page["url"])) + ".md")
 
     # Convert HTML to markdown
     body_html = page.get("body", "")
@@ -323,13 +335,25 @@ def save_page(course_dir: Path, page: dict, subdir: str = "pages") -> Path:
     return filepath
 
 
-def save_assignment(course_dir: Path, assignment: dict, subdir: str = "assignments") -> Path:
-    """Save an assignment as markdown."""
-    assignments_dir = course_dir / subdir
-    assignments_dir.mkdir(parents=True, exist_ok=True)
+def save_assignment(course_dir: Path, assignment: dict, subdir: str = "assignments",
+                    dest_dir: Path = None, dest_path: Path = None) -> Path:
+    """Save an assignment as markdown.
 
-    filename = slugify(assignment.get("name", str(assignment["id"]))) + ".md"
-    filepath = assignments_dir / filename
+    Args:
+        dest_path: If provided, write directly to this file path.
+        dest_dir: If provided, write into this directory (overrides course_dir/subdir).
+        Otherwise falls back to course_dir/subdir.
+    """
+    if dest_path:
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        filepath = dest_path
+    elif dest_dir:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        filepath = dest_dir / (slugify(assignment.get("name", str(assignment["id"]))) + ".md")
+    else:
+        assignments_dir = course_dir / subdir
+        assignments_dir.mkdir(parents=True, exist_ok=True)
+        filepath = assignments_dir / (slugify(assignment.get("name", str(assignment["id"]))) + ".md")
 
     # Convert HTML description to markdown
     desc_html = assignment.get("description", "") or ""
@@ -340,11 +364,21 @@ def save_assignment(course_dir: Path, assignment: dict, subdir: str = "assignmen
         "canvas_id": assignment.get("id"),
         "title": assignment.get("name"),
         "due_at": assignment.get("due_at"),
+        "unlock_at": assignment.get("unlock_at"),
+        "lock_at": assignment.get("lock_at"),
         "points_possible": assignment.get("points_possible"),
         "submission_types": assignment.get("submission_types"),
         "published": assignment.get("published", False),
         "rubric_id": assignment.get("rubric_settings", {}).get("id") if assignment.get("rubric_settings") else None,
     }
+
+    # Include checkpoint data for checkpointed discussions
+    if assignment.get("has_sub_assignments") and assignment.get("checkpoints"):
+        frontmatter["checkpoints"] = [
+            {k: v for k, v in cp.items() if k in ("tag", "points_possible", "due_at", "unlock_at", "lock_at") and v is not None}
+            for cp in assignment["checkpoints"]
+        ]
+
     # Remove None values
     frontmatter = {k: v for k, v in frontmatter.items() if v is not None}
 
@@ -383,6 +417,8 @@ def save_rubric(course_dir: Path, rubric: dict) -> Path:
             "points": criterion.get("points"),
             "ratings": []
         }
+        if criterion.get("ignore_for_scoring") is not None:
+            crit_data["ignore_for_scoring"] = criterion.get("ignore_for_scoring")
         for rating in criterion.get("ratings", []):
             crit_data["ratings"].append({
                 "id": rating.get("id"),
@@ -429,6 +465,8 @@ def convert_rubric_to_canvas_format(rubric_data: dict) -> dict:
         # Include ID if it exists (for updating existing criteria)
         if criterion.get("id"):
             criteria[str(i)]["id"] = criterion["id"]
+        if criterion.get("ignore_for_scoring") is not None:
+            criteria[str(i)]["ignore_for_scoring"] = criterion["ignore_for_scoring"]
 
     canvas_rubric["criteria"] = criteria
     return canvas_rubric
@@ -673,8 +711,24 @@ def pull(course: str, module_name: Optional[str], page_name: Optional[str],
     course_code = course_data.get("course_code", "")
     click.echo(f"Pulling from: {course_name}")
 
-    # Get course directory based on course code mapping
-    course_dir = get_course_folder(course_code, course_name)
+    # Check if there's an existing _course.yaml matching this course_id
+    # (search current directory and parents)
+    course_dir = None
+    for parent in [Path.cwd()] + list(Path.cwd().parents):
+        candidate = parent / "_course.yaml"
+        if candidate.exists():
+            try:
+                meta = yaml.safe_load(candidate.read_text()) or {}
+                if meta.get("canvas_id") == course_id:
+                    course_dir = parent
+                    break
+            except Exception:
+                pass
+
+    if course_dir is None:
+        # Fall back to config-based course folder mapping
+        course_dir = get_course_folder(course_code, course_name)
+
     course_dir.mkdir(parents=True, exist_ok=True)
     click.echo(f"  -> {course_dir}")
 
@@ -823,21 +877,73 @@ def pull(course: str, module_name: Optional[str], page_name: Optional[str],
         click.echo(f"\nPulled {pulled_count} items from module.")
         return
 
-    # Pull entire course
-    click.echo("  Pulling all pages...")
-    for page in api.get_pages(course_id):
-        full_page = api.get_page(course_id, page["url"])
-        save_page(course_dir, full_page)
-        pulled_count += 1
-    click.echo(f"    {pulled_count} pages")
+    # Map module membership, then enumerate all content so unassigned items survive.
+    existing = {}
+    module_dirs = {}
+    for path in course_dir.rglob("_module.yaml"):
+        meta = yaml.safe_load(path.read_text()) or {}
+        if isinstance(meta, dict) and meta.get("canvas_id"):
+            module_dirs[meta["canvas_id"]] = path.parent
+    for path in course_dir.rglob("*.md"):
+        if path.name.startswith("_"):
+            continue
+        try:
+            meta, _ = parse_markdown_file(path)
+        except (ValueError, yaml.YAMLError):
+            continue
+        if meta.get("canvas_url"):
+            existing[("page", meta["canvas_url"])] = path
+        elif meta.get("canvas_id") and ("submission_types" in meta or "points_possible" in meta):
+            existing[("assignment", meta["canvas_id"])] = path
 
-    assignment_count = 0
-    click.echo("  Pulling all assignments...")
+    destinations = {}
+    discussion_assignments = {}
+    for module in api.get_modules(course_id):
+        folder = module_dirs.get(module["id"], course_dir / slugify(module["name"]))
+        folder.mkdir(parents=True, exist_ok=True)
+        meta = {key: module.get(key) for key in (
+            "name", "position", "unlock_at", "require_sequential_progress", "published")}
+        meta["canvas_id"] = module["id"]
+        (folder / "_module.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))
+        for item in api.get_module_items(course_id, module["id"]):
+            kind = item.get("type")
+            if kind == "Page":
+                destinations.setdefault(("page", item["page_url"]), folder)
+            elif kind == "Assignment":
+                destinations.setdefault(("assignment", item["content_id"]), folder)
+            elif kind == "Quiz":
+                quiz = api._get(f"courses/{course_id}/quizzes/{item['content_id']}")
+                if quiz.get("assignment_id"):
+                    destinations.setdefault(("assignment", quiz["assignment_id"]), folder)
+            elif kind == "Discussion":
+                topic = api.get_discussion_topic(course_id, item["content_id"])
+                if topic.get("assignment_id"):
+                    assignment_id = topic["assignment_id"]
+                    destinations.setdefault(("assignment", assignment_id), folder)
+                    discussion_assignments[assignment_id] = topic
+                else:
+                    # Explicit discussion identity avoids sending this to the pages API.
+                    path = folder / (slugify(topic.get("title", "Discussion")) + ".md")
+                    meta = {"canvas_id": topic["id"], "discussion_topic_id": topic["id"],
+                            "title": topic.get("title", "Discussion")}
+                    path.write_text("---\n" + yaml.safe_dump(meta) + "---\n\n" +
+                                    html_to_markdown(topic.get("message", "") or ""))
+                    pulled_count += 1
+
+    for page in api.get_pages(course_id):
+        key = ("page", page["url"])
+        save_page(course_dir, api.get_page(course_id, page["url"]),
+                  dest_dir=destinations.get(key), dest_path=existing.get(key))
+        pulled_count += 1
     for assignment in api.get_assignments(course_id):
-        save_assignment(course_dir, assignment)
-        assignment_count += 1
-    click.echo(f"    {assignment_count} assignments")
-    pulled_count += assignment_count
+        key = ("assignment", assignment["id"])
+        topic = discussion_assignments.get(assignment["id"], {})
+        checkpoints = (topic.get("assignment") or {}).get("checkpoints")
+        if topic.get("is_checkpointed") and checkpoints:
+            assignment = dict(assignment, has_sub_assignments=True, checkpoints=checkpoints)
+        save_assignment(course_dir, assignment, dest_dir=destinations.get(key),
+                        dest_path=existing.get(key))
+        pulled_count += 1
 
     if rubrics:
         rubric_count = 0
@@ -897,6 +1003,26 @@ def push_file(api: CanvasAPI, filepath: Path, dry_run: bool = False) -> bool:
     """Push a single file to Canvas. Returns True if successful."""
     frontmatter, body = parse_markdown_file(filepath)
 
+    # PyYAML auto-parses ISO 8601 timestamps into Python datetime objects,
+    # which the JSON encoder used by requests cannot serialize. Normalize
+    # any datetime/date values to ISO 8601 strings (UTC, "Z" suffix) so
+    # date frontmatter fields can be safely passed to the Canvas API
+    # whether they were quoted as strings or not.
+    import datetime as _dt
+    def normalize(value):
+        if isinstance(value, _dt.datetime):
+            if value.tzinfo is not None:
+                value = value.astimezone(_dt.timezone.utc)
+            return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if isinstance(value, _dt.date):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {key: normalize(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        return value
+    frontmatter = normalize(frontmatter)
+
     if "canvas_id" not in frontmatter:
         click.echo(f"  Skipping {filepath.name}: no canvas_id in frontmatter", err=True)
         return False
@@ -920,6 +1046,10 @@ def push_file(api: CanvasAPI, filepath: Path, dry_run: bool = False) -> bool:
         click.echo(f"  Page: {frontmatter.get('title', filepath.name)}")
         if not dry_run:
             api.update_page(course_id, frontmatter["canvas_url"], body=body_html)
+    elif "discussion_topic_id" in frontmatter and not is_discussion:
+        if not dry_run:
+            api.update_discussion_topic(course_id, frontmatter["discussion_topic_id"],
+                                        message=body_html, title=frontmatter.get("title", filepath.stem))
     elif is_discussion:
         # It's a discussion topic - need to find topic_id from assignment_id
         click.echo(f"  Discussion: {frontmatter.get('title', filepath.name)}")
@@ -947,12 +1077,42 @@ def push_file(api: CanvasAPI, filepath: Path, dry_run: bool = False) -> bool:
             update_data["title"] = frontmatter["title"]
         if not dry_run:
             api.update_discussion_topic(course_id, topic_id, **update_data)
+
+        # Graded discussions are backed by an Assignment that owns due_at,
+        # unlock_at, lock_at, and points_possible. Push those to the assignment
+        # in addition to updating the topic message/title above.
+        assignment_update = {}
+        if "due_at" in frontmatter:
+            assignment_update["due_at"] = frontmatter["due_at"]
+        if "unlock_at" in frontmatter:
+            assignment_update["unlock_at"] = frontmatter["unlock_at"]
+        if "lock_at" in frontmatter:
+            assignment_update["lock_at"] = frontmatter["lock_at"]
+        if "points_possible" in frontmatter:
+            assignment_update["points_possible"] = frontmatter["points_possible"]
+        if assignment_update and not dry_run:
+            api.update_assignment(course_id, assignment_id, **assignment_update)
+
+        # Update checkpoints if present in frontmatter
+        if "checkpoints" in frontmatter and topic_id:
+            click.echo(f"    Updating checkpoints...")
+            for cp in frontmatter["checkpoints"]:
+                tag = cp.get("tag", "")
+                pts = cp.get("points_possible", "")
+                due = cp.get("due_at", "none")
+                click.echo(f"      {tag}: {pts} pts, due {due}")
+            if not dry_run:
+                api.update_checkpoints(topic_id, frontmatter["checkpoints"])
     elif "submission_types" in frontmatter or "points_possible" in frontmatter:
         # It's an assignment
         click.echo(f"  Assignment: {frontmatter.get('title', filepath.name)}")
         update_data = {"description": body_html}
         if "due_at" in frontmatter:
             update_data["due_at"] = frontmatter["due_at"]
+        if "unlock_at" in frontmatter:
+            update_data["unlock_at"] = frontmatter["unlock_at"]
+        if "lock_at" in frontmatter:
+            update_data["lock_at"] = frontmatter["lock_at"]
         if "points_possible" in frontmatter:
             update_data["points_possible"] = frontmatter["points_possible"]
         if not dry_run:
@@ -994,12 +1154,25 @@ def push(module_name: Optional[str], file_path: Optional[str], dry_run: bool):
 
     # Push module
     if module_name:
-        # Find the module directory
-        for course_path in courses_dir.iterdir():
-            if not course_path.is_dir():
-                continue
+        # Search for module directory in multiple locations:
+        # 1. Current directory (if it has _course.yaml)
+        # 2. Legacy courses_dir structure
+        search_dirs = []
 
-            for item_path in course_path.iterdir():
+        # Check current directory and parents for _course.yaml
+        for parent in [Path.cwd()] + list(Path.cwd().parents):
+            if (parent / "_course.yaml").exists():
+                search_dirs.append(parent)
+                break
+
+        # Also search legacy courses_dir
+        if courses_dir.exists():
+            for course_path in courses_dir.iterdir():
+                if course_path.is_dir():
+                    search_dirs.append(course_path)
+
+        for search_dir in search_dirs:
+            for item_path in search_dir.iterdir():
                 if item_path.is_dir() and module_name.lower() in item_path.name.lower():
                     click.echo(f"Pushing module: {item_path.name}")
 
